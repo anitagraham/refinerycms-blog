@@ -1,14 +1,16 @@
 class CreateCategoryTranslations < ActiveRecord::Migration[4.2]
-  def up
-    Refinery::Blog::Category.create_translation_table!({
-      :title => :string,
-      :slug => :string
-    }, {
-      :migrate_data => true
-    })
+  create_table :refinery_blog_category_translations do |t|
+    t.string :slug
+    t.string :title
+
+    t.string :locale, null: false
+    t.integer :refinery_blog_category_id, null: false
+
+    t.timestamps null: false
   end
 
   def down
-    Refinery::Blog::Category.drop_translation_table! :migrate_data => true
+    drop_table :refinery_blog_category_translations
   end
 end
+

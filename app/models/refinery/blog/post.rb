@@ -1,18 +1,23 @@
 require 'acts-as-taggable-on'
+require 'friendly_id'
+require 'friendly_id/mobility'
+require 'mobility'
 
 module Refinery
   module Blog
     class Post < ActiveRecord::Base
+      extend Mobility
       extend FriendlyId
 
       translates :title, :body, :custom_url, :custom_teaser, :slug, include: :seo_meta
+      after_save { translations.in_locale(Mobility.locale).seo_meta.save! }
 
       attribute :title
       attribute :body
       attribute :custom_url
       attribute :custom_teaser
       attribute :slug
-      after_save {translations.collect(&:save)}
+      # after_save {translations.collect(&:save)}
 
       class Translation
         is_seo_meta
@@ -22,14 +27,37 @@ module Refinery
         end
       end
 
+      class FriendlyIdOptions
+        def self.options
+          # Docs for friendly_id https://github.com/norman/friendly_id
+          friendly_id_options = {
+            use: [:mobility, :reserved],
+            reserved_words: Refinery::Pages.friendly_id_reserved_words
+          }
+          # if ::Refinery::Blog.scope_slug_by_parent
+          #   friendly_id_options[:use] << :scoped
+          #   friendly_id_options.merge!(scope: :parent)
+          # end
+
+          friendly_id_options
+        end
+      end
+
+      friendly_id :custom_slug_or_title, FriendlyIdOptions.options
+      # If custom_url or title changes tell friendly_id to regenerate slug when
+      # saving record
+
+      def should_generate_new_friendly_id?
+        title_changed? || custom_url_changed?
+      end
+
       def validating_source_urls?
         Refinery::Blog.validate_source_url
       end
 
-      friendly_id :friendly_id_source, :use => [:slugged, :globalize]
+      friendly_id :friendly_id_source, :use => [:slugged, :mobility]
 
       is_seo_meta
-
       acts_as_taggable
 
       belongs_to :author, proc { readonly(true) }, class_name: Refinery::Blog.user_class.to_s, foreign_key: :user_id, optional: true
@@ -51,22 +79,12 @@ module Refinery
         verify: [:resolve_redirects]
       }
 
-      class Translation
-        is_seo_meta
-      end
-
       # Override this to disable required authors
       def author_required?
         !Refinery::Blog.user_class.nil?
       end
 
-      # If custom_url or title changes tell friendly_id to regenerate slug when
-      # saving record
-      def should_generate_new_friendly_id?
-        saved_change_to_attribute?(:custom_url) || saved_change_to_attribute?(:title)
-      end
-
-      # Delegate SEO Attributes to globalize translation
+      # Delegate SEO Attributes to translation
       seo_fields = ::SeoMeta.attributes.keys.map {|a| [a, :"#{a}="]}.flatten
       delegate(*(seo_fields << {:to => :translation}))
 
@@ -94,26 +112,34 @@ module Refinery
 
       class << self
 
-        # Wrap up the logic of finding the pages based on the translations table.
-        def with_globalize(conditions = {})
-          conditions = {:locale => ::Globalize.locale}.merge(conditions)
-          globalized_conditions = {}
+        # Wrap up the logic of finding the posts based on the translations table.
+        def translated_attributes
+          Blog::Post.translated_attribute_names.map(&:to_s) | %w(locale)
+        end
+
+        def with_mobility(conditions = {})
+
+          conditions = {:locale => ::Mobility.locale.to_s}.merge(conditions)
+          mobility_conditions = {}
           conditions.keys.each do |key|
-            if (translated_attribute_names.map(&:to_s) | %w(locale)).include?(key.to_s)
-              globalized_conditions["#{self.translation_class.table_name}.#{key}"] = conditions.delete(key)
+            if translated_attributes.include? key.to_s
+              mobility_conditions["#{Blog::Post::Translation.table_name}.#{key}"] = conditions.delete(key)
             end
           end
           # A join implies readonly which we don't really want.
-          where(conditions).joins(:translations).where(globalized_conditions)
-            .readonly(false)
+          where(conditions).
+            joins(:translations).
+            where(mobility_conditions).
+            readonly(false)
         end
+
 
         def by_month(date)
           newest_first.where(:published_at => date.beginning_of_month..date.end_of_month)
         end
 
         def by_year(date)
-          newest_first.where(:published_at => date.beginning_of_year..date.end_of_year).with_globalize
+          newest_first.where(:published_at => date.beginning_of_year..date.end_of_year).with_mobility
         end
 
         def by_title(title)
@@ -133,7 +159,7 @@ module Refinery
         end
 
         def popular(count)
-          order("access_count DESC").limit(count).with_globalize
+          order("access_count DESC").limit(count).with_mobility
         end
 
         def previous(item)
@@ -149,13 +175,13 @@ module Refinery
         def next(current_record)
           where(arel_table[:published_at].gt(current_record.published_at))
             .where(:draft => false)
-            .order('published_at ASC').with_globalize.first
+            .order('published_at ASC').with_mobility.first
         end
 
         def published_before(date=Time.now)
           where(arel_table[:published_at].lt(date))
             .where(:draft => false)
-            .with_globalize
+            .with_mobility
         end
 
         alias_method :live, :published_before
