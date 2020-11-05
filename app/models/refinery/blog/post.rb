@@ -77,14 +77,20 @@ module Refinery
         verify: [:resolve_redirects]
       }
 
+      def validating_source_urls?
+        Refinery::Blog.validate_source_url
+      end
+
       # Override this to disable required authors
       def author_required?
         !Refinery::Blog.user_class.nil?
       end
 
-      # # Delegate SEO Attributes to translation
-      # seo_fields = ::SeoMeta.attributes.keys.map {|a| [a, :"#{a}="]}.flatten
-      #  delegate(*(seo_fields << {to: :translations}))
+      # If custom_url or title changes tell friendly_id to regenerate slug when
+      # saving record
+      def should_generate_new_friendly_id?
+        saved_change_to_attribute?(:custom_url) || saved_change_to_attribute?(:title)
+      end
 
       self.per_page = Refinery::Blog.posts_per_page
 
@@ -120,15 +126,13 @@ module Refinery
           conditions = {:locale => ::Mobility.locale.to_s}.merge(conditions)
           mobility_conditions = {}
           conditions.keys.each do |key|
-            if translated_attributes.include? key.to_s
-              mobility_conditions["#{Blog::Post::Translation.table_name}.#{key}"] = conditions.delete(key)
+            if (translated_attribute_names.map(&:to_s) | %w(locale)).include?(key.to_s)
+              mobilitized_conditions["#{Post::Translation.table_name}.#{key}"] = conditions.delete(key)
             end
           end
           # A join implies readonly which we don't really want.
-          where(conditions).
-            joins(:translations).
-            where(mobility_conditions).
-            readonly(false)
+          where(conditions).joins(:translations).where(mobilitized_conditions)
+            .readonly(false)
         end
 
 

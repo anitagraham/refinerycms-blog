@@ -11,13 +11,13 @@ module Refinery
 
           it "succeeds" do
             get :index
-            expect(response).to have_http_status(:success)
+            expect(response).to be_successful
             expect(response).to render_template(:index)
           end
 
           it "assigns unmoderated comments" do
             get :index
-            expect(assigns(:comments).count).to be > 0
+            expect(assigns(:comments).first).to eq(comment)
           end
         end
 
@@ -26,7 +26,7 @@ module Refinery
 
           it "succeeds" do
             get :approved
-            expect(response).to have_http_status(:success)
+            expect(response).to be_successful
             expect(response).to render_template(:index)
           end
 
@@ -41,7 +41,7 @@ module Refinery
 
           it "redirects on success" do
             post :approve, params: { id: comment.id }
-            expect(response).to have_http_status(:redirect)
+            expect(response).to be_redirect
           end
 
           it "approves the comment" do
@@ -55,7 +55,7 @@ module Refinery
 
           it "succeeds" do
             get :rejected
-            expect(response).to have_http_status(:success)
+            expect(response).to be_successful
             expect(response).to render_template(:index)
           end
 
@@ -70,7 +70,7 @@ module Refinery
 
           it "redirects on success" do
             post :reject, params: { :id => comment.id }
-            expect(response).to have_http_status(:redirect)
+            expect(response).to be_redirect
           end
 
           it "rejects the comment" do
